@@ -43,6 +43,10 @@ class JTAGStateMachine:
         self.state = RESET
         self.dr_in = ""
         self.ir_in = ""
+        self.dr_out = ""
+        self.dr_out_seen = ""
+        self.ir_out = ""
+        self.ir_out_seen = ""
 
     def update(self, tms, tdi):
         prev_state = self.state
@@ -53,15 +57,20 @@ class JTAGStateMachine:
         elif self.state == DRSELECT:
             self.state = IRSELECT if tms else DRCAPTURE
         elif self.state == DRCAPTURE:
+            #self.dr_out = " " + self.dr_out
+            self.dr_out = ""
             self.state = DREXIT1 if tms else DRSHIFT
         elif self.state == DRSHIFT:
             self.state = DREXIT1 if tms else DRSHIFT
             #print "shift in %s to DR" % tdi
             self.dr_in = self.dr_in[-79:] + '%d' % tdi
-            print "dr in  %s" % self.dr_in
+            if tms:
+                print "exit DRSHIFT after clocking tdi = %s tdo = %s" % (self.dr_in, self.dr_out)
+                #print "dr in  %s" % self.dr_in
+                #self.dr_in += " "
+                self.dr_in = ""
         elif self.state == DREXIT1:
             self.state = DRUPDATE if tms else DRPAUSE
-            self.dr_in += " "
         elif self.state == DRPAUSE:
             self.state = DREXIT2 if tms else DRPAUSE
         elif self.state == DREXIT2:
@@ -71,14 +80,18 @@ class JTAGStateMachine:
         elif self.state == IRSELECT:
             self.state = RESET if tms else IRCAPTURE
         elif self.state == IRCAPTURE:
+            #self.ir_out = " " + self.ir_out
+            self.ir_out = ""
             self.state = IREXIT1 if tms else IRSHIFT
         elif self.state == IRSHIFT:
             self.state = IREXIT1 if tms else IRSHIFT
-            #print "shift in %s to IR" % tdi
             self.ir_in = self.ir_in[-79:] + '%d' % tdi
-            print "ir in  %s" % self.ir_in
+            if tms:
+                print "exit IRSHIFT after clocking tdi = %s tdo = %s" % (self.ir_in, self.ir_out)
+                #print "ir in  %s" % self.ir_in
+                #self.ir_in += " "
+                self.ir_in = ""
         elif self.state == IREXIT1:
-            self.ir_in += " "
             self.state = IRUPDATE if tms else IRPAUSE
         elif self.state == IRPAUSE:
             self.state = IREXIT2 if tms else IRPAUSE
@@ -91,15 +104,24 @@ class JTAGStateMachine:
         if prev_state != self.state:
             print "%s -> %s" % (state_names[prev_state], state_names[self.state])
 
+    def received(self, tdo):
+        if self.state == DRSHIFT:
+            if tdo not in self.dr_out_seen: self.dr_out_seen += tdo
+            self.dr_out = tdo + self.dr_out[:79]
+            #print "DR OUT %s" % (self.dr_out)
+        elif self.state == IRSHIFT:
+            if tdo not in self.ir_out_seen: self.ir_out_seen += tdo
+            self.ir_out = tdo + self.ir_out[:79]
+            #print "IR OUT %s" % (self.ir_out)
+        else:
+            print "read %s in state %s" % (tdo, state_names[self.state])
+
+
 class SerialToNet(serial.threaded.Protocol):
     """serial->socket"""
 
     def __init__(self):
         self.socket = None
-        self.dr_out = ""
-        self.dr_out_seen = ""
-        self.ir_out = ""
-        self.ir_out_seen = ""
 
     def __call__(self):
         return self
@@ -107,16 +129,7 @@ class SerialToNet(serial.threaded.Protocol):
     def data_received(self, data):
         if self.socket is not None:
             for c in data:
-                if jtag_state.state == DRSHIFT:
-                    if c not in self.dr_out_seen: self.dr_out_seen += c
-                    self.dr_out = c + self.dr_out[:79]
-                    print "DR OUT %s [d %s i %s]" % (self.dr_out, self.dr_out_seen, self.ir_out_seen)
-                elif jtag_state.state == IRSHIFT:
-                    if c not in self.ir_out_seen: self.ir_out_seen += c
-                    self.ir_out = c + self.ir_out[:79]
-                    print "IR OUT %s [d %s i %s]" % (self.ir_out, self.dr_out_seen, self.ir_out_seen)
-                else:
-                    print "read %s in state %s" % (c, state_names[jtag_state.state])
+                jtag_state.received(c)
             self.socket.sendall(data)
 
 

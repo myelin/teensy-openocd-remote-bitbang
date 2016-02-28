@@ -36,24 +36,54 @@
  *   Or for more debug info: sudo pip install pyserial; python remote_bitbang_serial_debug.py -P 3335 /dev/tty.usbmodem*
  * - In another: openocd -d -c "reset_config srst_only; interface remote_bitbang; remote_bitbang_port 3335; remote_bitbang_host localhost" [-f ...]
  * 
+ * ALTERNATIVELY YOU CAN USE THIS AS A USB-SERIAL BRIDGE TO PROGRAM YOUR ESP8266!
+ *
+ * Uncomment the SERIAL_BRIDGE define below and connect your Teensy to your ESP8266 as follows:
+ *
+ * - gray = teensy pin 5 --> esp8266 CH_PD
+ * - purple = teensy pin 6 --> esp8266 GPIO0
+ * - blue = RX3 = teensy pin 7 --> esp8266 TX
+ * - green = TX3 = teensy pin 8 --> esp8266 RX
  */
 
+#define JTAG_BITBANG
+//#define SERIAL_BRIDGE
+
+#ifdef JTAG_BITBANG
+#ifdef SERIAL_BRIDGE
+#error JTAG_BITBANG and SERIAL_BRIDGE functions don't work together -- please choose just one.
+#endif // SERIAL_BRIDGE
 #define PIN_SRST 0
 #define PIN_TDI 1
 #define PIN_TDO 2
 #define PIN_TCK 3
 #define PIN_TMS 4
+#endif //JTAG_BITBANG
 
 #define PIN_LED 13
 
+#ifdef SERIAL_BRIDGE
+#define HWSerial Serial3
+// DTR connects to GPIO0 on the ESP8266
+#define DTR_PIN 6
+// RTS connects to CH_PD on the ESP8266
+#define RTS_PIN 5
+
+uint32_t current_baud = 9600;
+uint8_t current_dtr = -1, current_rts = -1;
+#endif // SERIAL_BRIDGE
+
+
+
 void setup() {
   // Init the Teensy USB serial port
-  Serial.begin(9600);
+  Serial.begin(9600); // fake value -- USB always 12Mbit
 
+#ifdef JTAG_BITBANG
   // Set up the JTAG pins
   pinMode(PIN_SRST, OUTPUT);
   pinMode(PIN_TDI, OUTPUT);
-  pinMode(PIN_TDO, INPUT);
+  pinMode(PIN_TDO, INPUT_PULLUP);
   pinMode(PIN_TCK, OUTPUT);
   pinMode(PIN_TMS, OUTPUT);
   pinMode(PIN_LED, OUTPUT);
@@ -62,9 +92,20 @@ void setup() {
   digitalWrite(PIN_TCK, LOW);
   digitalWrite(PIN_TMS, HIGH);
   digitalWrite(PIN_LED, HIGH);
+#endif // JTAG_BITBANG
+
+#ifdef SERIAL_BRIDGE
+  HWSerial.begin(9600);
+  pinMode(RTS_PIN, OUTPUT);
+  digitalWrite(RTS_PIN, LOW);
+  pinMode(DTR_PIN, OUTPUT);
+  digitalWrite(DTR_PIN, HIGH);
+#endif // SERIAL_BRIDGE
+
 }
 
 void loop() {
+#ifdef JTAG_BITBANG
   while (Serial.available() > 0) {
     uint8_t c = Serial.read();
     switch (c) {
@@ -75,7 +116,7 @@ void loop() {
       digitalWrite(PIN_LED, LOW);
       break;
     case 'R':
-      Serial.write(digitalRead(PIN_TDO) == HIGH ? '1' : '0');
+      Serial.write((digitalRead(PIN_TDO) == HIGH) ? '1' : '0');
       break;
     case 'Q':
       break;
@@ -139,5 +180,32 @@ void loop() {
       break;
     }
   }
+#endif // JTAG_BITBANG
+
+#ifdef SERIAL_BRIDGE
+  if (Serial.available() > 0) {
+    uint8_t c = Serial.read();
+    HWSerial.write(c);
+  }
+  while (HWSerial.available() > 0) {
+    Serial.write(HWSerial.read());
+  }
+  // update params
+  uint32_t baud = Serial.baud();
+  if (baud != current_baud) {
+    current_baud = baud;
+    HWSerial.begin(current_baud);
+  }
+  uint8_t rts = Serial.rts();
+  if (rts != current_rts) {
+    current_rts = rts;
+    digitalWrite(RTS_PIN, current_rts ? LOW : HIGH);
+  }
+  uint8_t dtr = Serial.dtr();
+  if (dtr != current_dtr) {
+    current_dtr = dtr;
+    digitalWrite(DTR_PIN, current_dtr ? LOW : HIGH);
+  }
+#endif // SERIAL_BRIDGE
 }
 
