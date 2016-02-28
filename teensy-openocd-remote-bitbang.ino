@@ -33,7 +33,8 @@
  * - Download the sketch to your Teensy
  * - Test with minicom -D /dev/tty.usbmodem1485121 (replace with your device name).  The LED should come on if you hit B, and go off if you hit b.
  * - In one terminal: socat -d -d -d file:/dev/tty.usbmodem1485121,clocal=1,cs8,nonblock=1,ixoff=0,ixon=0,ispeed=9600,ospeed=9600,raw,echo=0,crtscts=0 tcp-listen:3335,reuseaddr
- * - In another: openocd -d -c "interface remote_bitbang; remote_bitbang_port 3335; remote_bitbang_host localhost" [-f ...]
+ *   OR: sudo pip install pyserial; python tcp_serial_redirect.py -P 3335 /dev/tty.usbmodem*
+ * - In another: openocd -d -c "reset_config srst_only; interface remote_bitbang; remote_bitbang_port 3335; remote_bitbang_host localhost" [-f ...]
  * 
  */
 
