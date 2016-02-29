@@ -64,16 +64,16 @@
 
 #ifdef SERIAL_BRIDGE
 #define HWSerial Serial3
+
 // DTR connects to GPIO0 on the ESP8266
-#define DTR_PIN 6
-// RTS connects to CH_PD on the ESP8266
-#define RTS_PIN 5
+#define PIN_GPIO0 6
+
+// RTS connects to CH_PD/CHIP_EN on the ESP8266
+#define PIN_CHIP_EN 5
 
 uint32_t current_baud = 9600;
 uint8_t current_dtr = -1, current_rts = -1;
 #endif // SERIAL_BRIDGE
-
-
 
 void setup() {
   // Init the Teensy USB serial port
@@ -96,10 +96,10 @@ void setup() {
 
 #ifdef SERIAL_BRIDGE
   HWSerial.begin(9600);
-  pinMode(RTS_PIN, OUTPUT);
-  digitalWrite(RTS_PIN, LOW);
-  pinMode(DTR_PIN, OUTPUT);
-  digitalWrite(DTR_PIN, HIGH);
+  pinMode(PIN_GPIO0, OUTPUT);
+  digitalWrite(PIN_GPIO0, HIGH);
+  pinMode(PIN_CHIP_EN, OUTPUT);
+  digitalWrite(PIN_CHIP_EN, HIGH);
 #endif // SERIAL_BRIDGE
 
 }
@@ -170,14 +170,30 @@ void loop() {
       break;
     case 'r':
     case 't':
+      // SRST=0, which confusingly means to *exit* reset (as /RESET and /TRST are active-low)
       // We don't have a TRST connection, so 'r' and 't' do the same thing.
-      digitalWrite(PIN_SRST, LOW);
+      digitalWrite(PIN_SRST, HIGH);
+      //digitalWrite(PIN_CHIP_EN, HIGH);
       break;
     case 's':
     case 'u':
+      // SRST=1 -- enter RESET state
       // Likewise for 's' and 'u'.
-      digitalWrite(PIN_SRST, HIGH);
+      digitalWrite(PIN_SRST, LOW);
+      //digitalWrite(PIN_CHIP_EN, LOW);
       break;
+      /*
+    case 'X':
+      // esp8266 reset
+      pinMode(PIN_TDO, INPUT_PULLUP);
+      digitalWrite(PIN_GPIO0, HIGH);
+      digitalWrite(PIN_SRST, LOW);
+      digitalWrite(PIN_CHIP_EN, LOW);
+      delay(100);
+      digitalWrite(PIN_SRST, HIGH);
+      digitalWrite(PIN_CHIP_EN, HIGH);
+      break;
+      */
     }
   }
 #endif // JTAG_BITBANG
@@ -199,12 +215,12 @@ void loop() {
   uint8_t rts = Serial.rts();
   if (rts != current_rts) {
     current_rts = rts;
-    digitalWrite(RTS_PIN, current_rts ? LOW : HIGH);
+    digitalWrite(PIN_CHIP_EN, current_rts ? LOW : HIGH);
   }
   uint8_t dtr = Serial.dtr();
   if (dtr != current_dtr) {
     current_dtr = dtr;
-    digitalWrite(DTR_PIN, current_dtr ? LOW : HIGH);
+    digitalWrite(PIN_GPIO0, current_dtr ? LOW : HIGH);
   }
 #endif // SERIAL_BRIDGE
 }

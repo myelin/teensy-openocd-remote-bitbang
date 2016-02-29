@@ -15,6 +15,8 @@ import socket
 import serial
 import serial.threaded
 
+SHOW_STATE_TRANSITIONS = 0
+
 RESET     = 0
 IDLE      = 1
 DRSELECT  = 2
@@ -47,10 +49,13 @@ class JTAGStateMachine:
         self.dr_out_seen = ""
         self.ir_out = ""
         self.ir_out_seen = ""
+        self.trst = -1
+        self.srst = -1
 
     def update(self, tms, tdi):
         prev_state = self.state
         if self.state == RESET:
+            print "TAP reset"
             self.state = RESET if tms else IDLE
         elif self.state == IDLE:
             self.state = DRSELECT if tms else IDLE
@@ -63,9 +68,9 @@ class JTAGStateMachine:
         elif self.state == DRSHIFT:
             self.state = DREXIT1 if tms else DRSHIFT
             #print "shift in %s to DR" % tdi
-            self.dr_in = self.dr_in[-79:] + '%d' % tdi
+            self.dr_in = self.dr_in + '%d' % tdi
             if tms:
-                print "exit DRSHIFT after clocking tdi = %s tdo = %s" % (self.dr_in, self.dr_out)
+                print "%sexit DRSHIFT after clocking tdi = %s tdo = %s" % (self.reset_state(), self.dr_in, self.dr_out)
                 #print "dr in  %s" % self.dr_in
                 #self.dr_in += " "
                 self.dr_in = ""
@@ -85,9 +90,9 @@ class JTAGStateMachine:
             self.state = IREXIT1 if tms else IRSHIFT
         elif self.state == IRSHIFT:
             self.state = IREXIT1 if tms else IRSHIFT
-            self.ir_in = self.ir_in[-79:] + '%d' % tdi
+            self.ir_in = self.ir_in + '%d' % tdi
             if tms:
-                print "exit IRSHIFT after clocking tdi = %s tdo = %s" % (self.ir_in, self.ir_out)
+                print "%sexit IRSHIFT after clocking tdi = %s tdo = %s" % (self.reset_state(), self.ir_in, self.ir_out)
                 #print "ir in  %s" % self.ir_in
                 #self.ir_in += " "
                 self.ir_in = ""
@@ -101,21 +106,39 @@ class JTAGStateMachine:
             self.state = DRSELECT if tms else IDLE
         else:
             raise Exception("invalid state %d", self.state)
-        if prev_state != self.state:
+        if SHOW_STATE_TRANSITIONS and prev_state != self.state:
             print "%s -> %s" % (state_names[prev_state], state_names[self.state])
 
     def received(self, tdo):
         if self.state == DRSHIFT:
             if tdo not in self.dr_out_seen: self.dr_out_seen += tdo
-            self.dr_out = tdo + self.dr_out[:79]
+            self.dr_out = tdo + self.dr_out
             #print "DR OUT %s" % (self.dr_out)
         elif self.state == IRSHIFT:
             if tdo not in self.ir_out_seen: self.ir_out_seen += tdo
-            self.ir_out = tdo + self.ir_out[:79]
+            self.ir_out = tdo + self.ir_out
             #print "IR OUT %s" % (self.ir_out)
         else:
             print "read %s in state %s" % (tdo, state_names[self.state])
 
+    def reset(self, trst, srst):
+        if trst != self.trst:
+            print "TEST RESET change: %d" % trst
+            self.trst = trst
+        if srst != self.srst:
+            print "SYSTEM RESET change: %d" % srst
+            self.srst = srst
+
+    def reset_state(self):
+        if self.srst:
+            if self.trst:
+                return "[SYS + TEST RESET] "
+            else:
+                return "[SYS RESET] "
+        elif self.trst:
+            return "[TEST RESET] "
+        else:
+            return ""
 
 class SerialToNet(serial.threaded.Protocol):
     """serial->socket"""
@@ -251,20 +274,33 @@ it waits for the next connect.
                 # enter network <-> serial loop
                 while True:
                     try:
+                        # data = ''
+                        # while 1:
+                        #     pkt = client_socket.recv(1024)
+                        #     print "pkt", `pkt`
+                        #     if not pkt:
+                        #         break
+                        #     data += pkt
                         data = client_socket.recv(1024)
-                        if not data:
-                            break
+                        if not data: break
                         # received bytes from openocd
+                        # print "received bytes %s" % `data`
+                        ser.write(data)
                         for c in data:
+                            # ser.write(c)
                             ptck, ptms, ptdi = (tck, tms, tdi)
                             if c == 'B':
                                 print "LED ON"
                             elif c == 'b':
                                 print "led off"
-                            elif c in ('r', 't'):
-                                print "SRST LOW - IN RESET"
-                            elif c in ('s', 'u'):
-                                print "srst high - out of reset"
+                            elif c == 'r':
+                                jtag_state.reset(0, 0)
+                            elif c == 's':
+                                jtag_state.reset(0, 1)
+                            elif c == 't':
+                                jtag_state.reset(1, 0)
+                            elif c == 'u':
+                                jtag_state.reset(1, 1)
                             elif c == '0':
                                 #print " tck   tms   tdi"
                                 tck, tms, tdi = (0, 0, 0)
@@ -292,9 +328,12 @@ it waits for the next connect.
                             elif c == 'R':
                                 if jtag_state.state not in (DRSHIFT, IRSHIFT):
                                     print "read during %s state" % state_names[jtag_state.state]
+                            elif c == 'Q':
+                                print "OpenOCD exit"
+                                jtag_state = JTAGStateMachine()
+                                print "\n" * 10
                             else:
                                 print "unknown char %s" % `c`
-                            ser.write(c)
                             if tck and not ptck:
                                 if ptms != tms:
                                     print "updating tms on rising tck edge"
