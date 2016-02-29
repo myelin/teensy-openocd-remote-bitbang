@@ -14,8 +14,10 @@ import sys
 import socket
 import serial
 import serial.threaded
+import time
 
 SHOW_STATE_TRANSITIONS = 0
+COLLECT_PACKETS = 1
 
 RESET     = 0
 IDLE      = 1
@@ -268,23 +270,31 @@ it waits for the next connect.
         while True:
             sys.stderr.write('Waiting for connection on {}...\n'.format(args.localport))
             client_socket, addr = srv.accept()
+            if COLLECT_PACKETS: client_socket.setblocking(0)
             sys.stderr.write('Connected by {}\n'.format(addr))
             try:
                 ser_to_net.socket = client_socket
                 # enter network <-> serial loop
                 while True:
                     try:
-                        # data = ''
-                        # while 1:
-                        #     pkt = client_socket.recv(1024)
-                        #     print "pkt", `pkt`
-                        #     if not pkt:
-                        #         break
-                        #     data += pkt
-                        data = client_socket.recv(1024)
-                        if not data: break
-                        # received bytes from openocd
+                        if COLLECT_PACKETS:
+                            data = ''
+                            while 1:
+                                try:
+                                    data += client_socket.recv(1024)
+                                except IOError, e:
+                                    if e.errno == 35:
+                                        break
+                                    raise
+                            if data == '':
+                                # print "sleep"
+                                time.sleep(0.001)
+                                continue
+                        else:
+                            data = client_socket.recv(1024)
+                            if not data: break
                         # print "received bytes %s" % `data`
+                        # received bytes from openocd
                         ser.write(data)
                         for c in data:
                             # ser.write(c)
